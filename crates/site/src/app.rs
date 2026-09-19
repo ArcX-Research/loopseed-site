@@ -6,10 +6,12 @@ use crate::pages::{
 };
 use crate::util::scroll_to_top;
 use leptos::prelude::*;
+use leptos::{ev, html};
 use leptos_router::components::{Redirect, Route, Router, Routes};
 use leptos_router::hooks::use_location;
 use leptos_router::{path, NavigateOptions};
 use loopseed_record::{ORGANISATION, ORGANISATION_URL, REPOSITORY_URL};
+use wasm_bindgen::JsCast;
 
 pub const NAV: &[(&str, &str)] = &[
     ("/", "Home"),
@@ -52,14 +54,82 @@ fn LegacyGoals() -> impl IntoView {
 #[component]
 fn Header() -> impl IntoView {
     let pathname = use_location().pathname;
+    let (menu_open, set_menu_open) = signal(false);
+    let header = NodeRef::<html::Header>::new();
+    let toggle = NodeRef::<html::Button>::new();
+
+    Effect::new(move |_| {
+        pathname.track();
+        set_menu_open.set(false);
+    });
+
+    let outside_click = window_event_listener(ev::pointerdown, move |event| {
+        if menu_open.get_untracked() {
+            let target = event
+                .target()
+                .and_then(|target| target.dyn_into::<web_sys::Node>().ok());
+            if let (Some(header), Some(target)) = (header.get(), target) {
+                if !header.contains(Some(&target)) {
+                    set_menu_open.set(false);
+                }
+            }
+        }
+    });
+    let resize = window_event_listener(ev::resize, move |_| {
+        if window()
+            .inner_width()
+            .ok()
+            .and_then(|width| width.as_f64())
+            .is_some_and(|width| width > 820.0)
+        {
+            set_menu_open.set(false);
+        }
+    });
+    on_cleanup(move || {
+        outside_click.remove();
+        resize.remove();
+    });
+
     view! {
-        <header class="site-header">
+        <header
+            class="site-header"
+            node_ref=header
+            on:keydown=move |event| {
+                if event.key() == "Escape" && menu_open.get_untracked() {
+                    event.prevent_default();
+                    set_menu_open.set(false);
+                    if let Some(toggle) = toggle.get() { let _ = toggle.focus(); }
+                }
+            }
+            on:focusout=move |event| {
+                let target = event.related_target().and_then(|target| target.dyn_into::<web_sys::Node>().ok());
+                if let (Some(header), Some(target)) = (header.get(), target) {
+                    if !header.contains(Some(&target)) {
+                        set_menu_open.set(false);
+                    }
+                }
+            }
+        >
             <div class="wrap header-row">
-                <a class="brand" href="/" aria-label="Loopseed home">
+                <a class="brand" href="/" aria-label="Loopseed home" on:click=move |_| set_menu_open.set(false)>
                     <Mark/>
                     <span class="brand-name">"Loopseed"</span>
                 </a>
-                <nav class="nav" aria-label="Primary">
+                <button
+                    class="nav-toggle"
+                    type="button"
+                    node_ref=toggle
+                    aria-controls="primary-navigation"
+                    aria-expanded=move || menu_open.get().to_string()
+                    aria-label=move || if menu_open.get() { "Close menu" } else { "Open menu" }
+                    on:click=move |_| set_menu_open.update(|open| *open = !*open)
+                >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+                        <path class="menu-icon" d="M4 6h16M4 12h16M4 18h16"/>
+                        <path class="close-icon" d="m6 6 12 12M6 18 18 6"/>
+                    </svg>
+                </button>
+                <nav id="primary-navigation" class="nav" class:nav-open=move || menu_open.get() aria-label="Primary">
                     {NAV.iter().map(|(href, label)| {
                         let href = *href;
                         let label = *label;
@@ -67,7 +137,9 @@ fn Header() -> impl IntoView {
                             let path = pathname.get();
                             if href == "/" { path == "/" } else { path.starts_with(href) }
                         };
-                        view! { <a href=href aria-current=move || current().then_some("page")>{label}</a> }
+                        view! {
+                            <a href=href aria-current=move || current().then_some("page") on:click=move |_| set_menu_open.set(false)>{label}</a>
+                        }
                     }).collect_view()}
                 </nav>
             </div>
